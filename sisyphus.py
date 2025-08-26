@@ -393,7 +393,7 @@ def main(branch1: str, branch2: str, force: bool, arch: str, comp: str) -> None:
             .select(pl.all().exclude("compare"))
         )
 
-        json_data[arch] = {
+        json_data[sys_arch] = {
             "second_only_count": len(second_only_packages),
             "second_only_packages": second_only_packages.to_dicts(),
             "first_only_count": len(first_only_packages),
