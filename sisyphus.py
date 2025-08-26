@@ -70,10 +70,10 @@ def delete_file(file: Path) -> bool:
 
 
 def get_file_modification_time(file: Path) -> datetime.datetime:
-    """Возвращает время модификации файла.
+    """Return the modification time of a file.
 
-    :param file: Путь к файлу.
-    :return: Время модификации файла.
+    :param file: Path to the file.
+    :return: Modification time of the file.
     """
     return datetime.datetime.fromtimestamp(file.stat().st_mtime, tz=datetime.UTC)
 
@@ -113,10 +113,11 @@ def create_cache_dir(cache_dir: Path|None = None) -> bool:
     return cache_dir.exists()
 
 
-def get_branch_json(branch: str) -> Path|None:
+def get_branch_json(branch: str, arch: str = "all") -> Path|None:
     """Return the path to the cache file corresponding to the distribution branch.
 
     :param branch: Alt Linux branch.
+    :param arch: Alt Linux architecture.
     :return: Path to the cache file if it exists or was successfully created.
     """
     json_file = get_branch_file_name(branch)
@@ -128,10 +129,16 @@ def get_branch_json(branch: str) -> Path|None:
             create_cache_dir()
         # загрузка файла
         print(f"Downloading json data for {branch}...")
-        json_file = download(
-            f"https://rdb.altlinux.org/api/export/branch_binary_packages/{branch}",
-            json_file,
-        )
+        if arch == "all":
+            json_file = download(
+                f"https://rdb.altlinux.org/api/export/branch_binary_packages/{branch}",
+                json_file,
+            )
+        else:
+            json_file = download(
+                f"https://rdb.altlinux.org/api/export/branch_binary_packages/{branch}?arch={arch}",
+                json_file,
+            )
     return json_file
 
 
@@ -218,17 +225,17 @@ def download(url: str, filename: Path) -> Path|None:
             return filename
 
 
-def safe_version(v: str) -> str:
+def safe_version(version_name: str) -> str:
     """Normalize version string for comparison.
 
-    :param v: Input version string.
+    :param version_name: Input version string.
     :return: Normalized version string, using `packaging.version.parse` if possible,
              otherwise falling back to zero-padded numeric parts and lowercase text.
     """
     try:
-        return str(version.parse(v))
+        return str(version.parse(version_name))
     except version.InvalidVersion:
-        parts = v.split(".")
+        parts = version_name.split(".")
         normalized = []
         for p in parts:
             if p.isdigit():
@@ -242,6 +249,10 @@ def safe_version(v: str) -> str:
 @click.command()
 @click.argument("branch1", type=click.STRING)
 @click.argument("branch2", type=click.STRING)
+@click.option("--arch", "-a",
+              default="all",
+              help="Only one architecture. Example: --arch aarch64"
+)
 @click.option(
     "--force",
     "-f",
@@ -249,75 +260,93 @@ def safe_version(v: str) -> str:
     is_flag=True,
     default=False,
 )
-def main(branch1: str, branch2: str, force: bool): # noqa: FBT001
-    """Программа, сравнивающая пакеты в двух разных ветках Alt Linux.
+def main(branch1: str, branch2: str, force: bool, arch: str) -> None: # noqa: FBT001
+    """Compare packages in two different Alt Linux branches.
 
-    BRANCH1, BRANCH2 - имена веток.
-
-    Пример:  sisyphus.py sisyphus p11
+    BRANCH1, BRANCH2 - names of the branches.
+    Example:  sisyphus.py sisyphus p11
     """
+    json2 = None
     if force:
         click.echo("Forcing overwrite of existing branches data.")
         if is_branch_cache_exists(branch1):
             delete_file(get_branch_file_name(branch1))
         if is_branch_cache_exists(branch2):
             delete_file(get_branch_file_name(branch2))
-    json1 = get_branch_json(branch1)
-    click.echo(f"JSON file for branch name {branch1} is {json1}.")
+    json1 = get_branch_json(branch1, arch)
+
     if json1:
-        json2 = get_branch_json(branch2)
-        click.echo(f"JSON file for branch name {branch2} is {json2}.")
-        if not json2:
+        click.echo(f"JSON file for branch name {branch1} is {json1}.")
+        json2 = get_branch_json(branch2, arch)
+        if json2:
+            click.echo(f"JSON file for branch name {branch2} is {json2}.")
+        else:
             click.echo(f"Don't know how to get JSON file for branch name {branch2}.")
+            return
     else:
         click.echo(f"Don't know how to get JSON file for branch name {branch1}.")
-    if json1 and json2:
-        first = pl.read_json(json1).select("packages").explode("packages").unnest("packages")
-        second = pl.read_json(json2).select("packages").explode("packages").unnest("packages")
+        return
 
-        archs = second["arch"].unique().append(first["arch"].unique()).unique()
+    col = "packages"
+    first_branch_packages = pl.read_json(json1).select(col).explode(col).unnest(col)
+    second_branch_packages = pl.read_json(json2).select(col).explode(col).unnest(col)
 
-        for arch in list(archs):
-            first_by_arch = first.filter(first["arch"] == arch)
-            second_by_arch = second.filter(second["arch"] == arch)
+    architectures = (
+        second_branch_packages["arch"].unique()
+        .append(
+            first_branch_packages["arch"].unique()
+        ).unique()
+    )
+    json_data = {}
+    for sys_arch in list(architectures):
+        first_by_arch = first_branch_packages.filter(first_branch_packages["arch"] == sys_arch)  # noqa: E501
+        second_by_arch = second_branch_packages.filter(second_branch_packages["arch"] == sys_arch)  # noqa: E501
 
-            second_only = second_by_arch.join(
-                first_by_arch, on="name", how="anti",
-            )  # первое задание
-            first_only = first_by_arch.join(
-                second_by_arch, on="name", how="anti",
-            )  # второе задание
+        # Первая задача:
+        # Выбрать из списка пакетов все пакеты, которые есть
+        # во второй ветке дистрибутива, но нет в первой.
+        second_only_packages = second_by_arch.join(first_by_arch, on="name", how="anti")
 
-            equal_packages = second_by_arch.join(
-                first_by_arch, on="name", how="inner",
-            ).select("name", first_branch_version="version_right",
-                     second_branch_version="version", arch="arch")
+        # Вторая задача:
+        # Выбрать из списка пакетов все пакеты, которые есть
+        # в первой ветке дистрибутива, но нет во второй.
+        first_only_packages = first_by_arch.join(second_by_arch, on="name", how="anti")
 
-            result = equal_packages.filter(
-                pl.col("first_branch_version").map_elements(
-                    safe_version, return_dtype=pl.Utf8)
-                > pl.col("second_branch_version").map_elements(
-                    safe_version, return_dtype=pl.Utf8),
-            )  # третье задание
+        # Третья задача:
+        # Выбрать все пакеты из первой ветки дистрибутива, версии которых больше
+        # чем версии тех же пакетов второй ветки дистрибутива.
+        equal_packages = second_by_arch.join(
+            first_by_arch, on="name", how="inner",
+        ).select("name", first_branch_version="version_right",
+            second_branch_version="version", arch="arch"
+        )
+        newest_packages = equal_packages.filter(
+            pl.col("first_branch_version").map_elements(
+                safe_version, return_dtype=pl.Utf8
+            ) > pl.col("second_branch_version").map_elements(
+                safe_version, return_dtype=pl.Utf8
+            ),
+        )
 
-            json_data = {}
-
-            json_data[arch] = {
-                "second_only_count": len(second_only),
-                "second_only": second_only.to_dicts(),
-                "first_only_count": len(first_only),
-                "first_only": first_only.to_dicts(),
-                "newer_in_first_count": len(result),
-                "newer_in_first": result.to_dicts(),
-            }
-        try:
-            with open(f"{get_cache_dir_path()}/data.json", "w+", encoding="utf-8") as f:
-                json.dump(json_data, f, indent=2, ensure_ascii=False)
-            click.echo(f"Result downloaded in {get_cache_dir_path()}/data.json.")
-        except Exception:
-            click.echo("Failed to write calculated data.")
+        json_data[arch] = {
+            "second_only_count": len(second_only_packages),
+            "second_only_packages": second_only_packages.to_dicts(),
+            "first_only_count": len(first_only_packages),
+            "first_only_packages": first_only_packages.to_dicts(),
+            "newest_in_first_count": len(newest_packages),
+            "newest_in_first": newest_packages.to_dicts(),
+        }
+    try:
+        output_file_name = f"{get_cache_dir_path()}/output.json"
+        output_file = Path(output_file_name)
+        with output_file.open("w+", encoding="utf-8") as f:
+            json.dump(json_data, f, indent=2, ensure_ascii=False)
+            f.flush()
 
 
+        click.echo(f"Result downloaded in {output_file_name}.")
+    except Exception:
+        click.echo("Failed to write calculated data.")
 
 
 if __name__ == "__main__":

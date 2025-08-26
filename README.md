@@ -44,23 +44,24 @@ Dependencies:
 Run the CLI tool with two branch names:
 
 ```bash
-uv run main.py <branch1> <branch2>
+uv run sisiphus.py <branch1> <branch2>
 ```
 
 Example:
 
 ```bash
-uv run main.py sisyphus p11
+uv run sisyphus.py sisyphus p11
 ```
 
 ### Options
 
 - `--force` / `-f` : Force overwrite of cached data
+- `--arch` / `-a` : Download only this architecture
 
 Example:
 
 ```bash
-uv run main.py sisyphus p11 --force
+uv run sisyphus.py sisyphus p11 --force
 ```
 
 ## Output
@@ -68,7 +69,7 @@ uv run main.py sisyphus p11 --force
 The JSON file is saved at:
 
 ```
-~/.sisyphus/data.json
+~/.sisyphus/output.json
 ```
 
 Example structure:
