@@ -232,17 +232,66 @@ def safe_version(version_name: str) -> str:
     :return: Normalized version string, using `packaging.version.parse` if possible,
              otherwise falling back to zero-padded numeric parts and lowercase text.
     """
+    parts = version_name.split(".")
+    normalized = []
+    for p in parts:
+        if p.isdigit():
+            normalized.append(f"{int(p):08d}")
+        else:
+            normalized.append(p.lower())
+    return ".".join(normalized)
+
+
+def compare(m: str, n: str) -> str:
+    """Compare two versions.
+
+    :param m: First version string.
+    :param n: Second version string.
+    :return: Symbol of comparison between `m` and `n`.
+    """
+    def strange_compare(m: str, n: str) -> str:
+        v1_srange = safe_version(m)
+        v2_strange = safe_version(n)
+        if v1_srange < v2_strange:
+            return "<"
+        return ">"
+    if m == n:
+        return "="
     try:
-        return str(version.parse(version_name))
-    except version.InvalidVersion:
-        parts = version_name.split(".")
-        normalized = []
-        for p in parts:
-            if p.isdigit():
-                normalized.append(f"{int(p):08d}")
-            else:
-                normalized.append(p.lower())
-        return ".".join(normalized)
+        v1 = version.parse(m)
+        v2 = version.parse(n)
+    except ValueError:
+        return strange_compare(m, n)
+    if v1 < v2:
+        return "<"
+    return ">"
+
+def get_filter_expression(parameter: str) -> pl.Expr:
+        """Get polars expression by comparison symbol.
+
+        :param parameter: Comparison parameter, e.g. > or <.
+        :return: Polars expression for this parameter.
+        """
+        ex_unknown = pl.col("compare")=="?"
+        ex_less = pl.col("compare")=="<"
+        ex_great = pl.col("compare")==">"
+        ex_equal = pl.col("compare")=="="
+        ex_great_or_equal = ex_great | ex_equal
+
+        filter_expression = ex_unknown
+        if parameter == "?":
+            filter_expression = ex_unknown
+        elif parameter == "=":
+            filter_expression = ex_equal
+        elif parameter == "<":
+            filter_expression = ex_less
+        elif parameter == ">":
+            filter_expression = ex_great
+        elif parameter == ">=":
+            filter_expression = ex_great_or_equal
+        return filter_expression
+
+
 
 # ########################################################################
 
@@ -315,17 +364,26 @@ def main(branch1: str, branch2: str, force: bool, arch: str) -> None: # noqa: FB
         # Третья задача:
         # Выбрать все пакеты из первой ветки дистрибутива, версии которых больше
         # чем версии тех же пакетов второй ветки дистрибутива.
-        equal_packages = second_by_arch.join(
-            first_by_arch, on="name", how="inner",
-        ).select("name", first_branch_version="version_right",
-            second_branch_version="version", arch="arch"
-        )
-        newest_packages = equal_packages.filter(
-            pl.col("first_branch_version").map_elements(
-                safe_version, return_dtype=pl.Utf8
-            ) > pl.col("second_branch_version").map_elements(
-                safe_version, return_dtype=pl.Utf8
-            ),
+
+        equal_packages = (
+            second_by_arch.join(first_by_arch, on="name", how="inner")
+            .select(
+                "name",
+                first_branch_version="version_right",
+                second_branch_version="version",
+            )
+            .with_columns(
+                pl.struct("first_branch_version", "second_branch_version")
+                .map_elements(
+                    lambda s: compare(
+                        s["first_branch_version"], s["second_branch_version"]
+                    ),
+                    return_dtype=pl.String,
+                )
+                .alias("compare")
+            )
+            .filter(get_filter_expression(">"))
+            .select(pl.all().exclude("compare"))
         )
 
         json_data[arch] = {
@@ -333,9 +391,10 @@ def main(branch1: str, branch2: str, force: bool, arch: str) -> None: # noqa: FB
             "second_only_packages": second_only_packages.to_dicts(),
             "first_only_count": len(first_only_packages),
             "first_only_packages": first_only_packages.to_dicts(),
-            "newest_in_first_count": len(newest_packages),
-            "newest_in_first": newest_packages.to_dicts(),
+            "newest_in_first_count": len(equal_packages),
+            "newest_in_first": equal_packages.to_dicts(),
         }
+
     try:
         output_file_name = f"{get_cache_dir_path()}/output.json"
         output_file = Path(output_file_name)
