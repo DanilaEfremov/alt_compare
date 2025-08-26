@@ -57,11 +57,14 @@ uv run sisyphus.py sisyphus p11
 
 - `--force` / `-f` : Force overwrite of cached data
 - `--arch` / `-a` : Download only this architecture
+- `--comp` / `-c` : Comparison by needed symbol
 
 Example:
 
 ```bash
 uv run sisyphus.py sisyphus p11 --force
+uv run sisyphus.py sisyphus p11 --arch aarch64
+uv run sisyphus.py sisyphus p11 --comp ">"
 ```
 
 ## Output

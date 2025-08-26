@@ -309,7 +309,14 @@ def get_filter_expression(parameter: str) -> pl.Expr:
     is_flag=True,
     default=False,
 )
-def main(branch1: str, branch2: str, force: bool, arch: str) -> None: # noqa: FBT001
+@click.option(
+    "--comp",
+    "-c",
+    type=click.Choice(["?", "<", ">", "=", ">="]),
+    help="How to compare two branches versions.",
+    default=">",
+)
+def main(branch1: str, branch2: str, force: bool, arch: str, comp: str) -> None: # noqa: FBT001
     """Compare packages in two different Alt Linux branches.
 
     BRANCH1, BRANCH2 - names of the branches.
@@ -382,7 +389,7 @@ def main(branch1: str, branch2: str, force: bool, arch: str) -> None: # noqa: FB
                 )
                 .alias("compare")
             )
-            .filter(get_filter_expression(">"))
+            .filter(get_filter_expression(comp))
             .select(pl.all().exclude("compare"))
         )
 
