@@ -15,6 +15,7 @@ import json
 import sys
 from http import HTTPStatus
 from pathlib import Path
+from timeit import default_timer as timer
 
 import click
 import polars as pl
@@ -366,6 +367,7 @@ def main(branch1: str, branch2: str, force: bool, arch: str, comp: str) -> None:
         click.echo(f"Don't know how to get JSON file for branch name {branch1}.")
         return
 
+    start_time = timer()
     col = "packages"
     first_branch_packages = pl.read_json(json1).select(col).explode(col).unnest(col)
     second_branch_packages = pl.read_json(json2).select(col).explode(col).unnest(col)
@@ -431,7 +433,8 @@ def main(branch1: str, branch2: str, force: bool, arch: str, comp: str) -> None:
         with output_file.open("w+", encoding="utf-8") as f:
             json.dump(json_data, f, indent=2, ensure_ascii=False)
             f.flush()
-        click.echo(f"Result downloaded in {output_file_name}.")
+        end_time = timer()
+        click.echo(f"Result downloaded in {output_file_name}, took {end_time - start_time} seconds.")  # noqa: E501
     except Exception:
         click.echo("Failed to write calculated data.")
 
