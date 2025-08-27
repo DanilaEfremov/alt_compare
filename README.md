@@ -27,11 +27,25 @@ git clone <repository_url>
 cd <repository_directory>
 ```
 
-2. Install dependencies:
+2. Make script executable:
 
 ```bash
-uv sync
+chmod +x sisyphus.py
 ```
+
+3. Install `uv` python package manager:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+4. Add `uv` to `PATH`
+
+```bash
+source $HOME/.local/bin/env
+```
+For more information about uv intallation visit:
+https://docs.astral.sh/uv/getting-started/installation/#installation-methods
 
 Dependencies:  
 - `click`  
@@ -44,13 +58,13 @@ Dependencies:
 Run the CLI tool with two branch names:
 
 ```bash
-uv run sisiphus.py <branch1> <branch2>
+./sisyphus.py <branch1> <branch2>
 ```
 
 Example:
 
 ```bash
-uv run sisyphus.py sisyphus p11
+./sisyphus.py sisyphus p11
 ```
 
 ### Options
@@ -62,17 +76,17 @@ uv run sisyphus.py sisyphus p11
 Example:
 
 ```bash
-uv run sisyphus.py sisyphus p11 --force
-uv run sisyphus.py sisyphus p11 --arch aarch64
-uv run sisyphus.py sisyphus p11 --comp ">"
+./sisyphus.py sisyphus p11 --force
+./sisyphus.py sisyphus p11 --arch aarch64
+./sisyphus.py sisyphus p11 --comp gt
 ```
 
 ## Output
 
-The JSON file is saved at:
+The JSON file is saved at current directory:
 
 ```
-~/.sisyphus/output.json
+./output.json
 ```
 
 Example structure:

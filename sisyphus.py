@@ -1,4 +1,16 @@
-import datetime  # noqa: D100
+#! /usr/bin/env -S uv run --script  # noqa: D100
+
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "click==8.2.1",
+#     "packaging>=25.0",
+#     "polars>=1.32.3",
+#     "requests>=2.32.5",
+# ]
+# ///
+
+import datetime
 import json
 import sys
 from http import HTTPStatus
@@ -242,79 +254,90 @@ def safe_version(version_name: str) -> str:
     return ".".join(normalized)
 
 
-def compare(m: str, n: str) -> str:
-    """Compare two versions.
+def compare(version_of_first_branch: str, version_of_second_branch: str) -> str:
+    """Compare two versions of packages.
 
-    :param m: First version string.
-    :param n: Second version string.
-    :return: Symbol of comparison between `m` and `n`.
-    """
+    :param version_of_first_branch: First version string.
+    :param version_of_second_branch: Second version string.
+    :return: Symbol of comparison between `version_of_first_branch` and `version_of_second_branch`.
+    """  # noqa: E501
     def strange_compare(m: str, n: str) -> str:
+        """Compare two versions of packages, if parent function can not perform comparison.
+
+        :param m: First version string.
+        :param n: Second version string.
+        :return: Symbol of comparison between `m` and `n`.
+        """  # noqa: E501
         v1_srange = safe_version(m)
         v2_strange = safe_version(n)
         if v1_srange < v2_strange:
             return "<"
         return ">"
-    if m == n:
+
+    if version_of_first_branch == version_of_second_branch:
         return "="
     try:
-        v1 = version.parse(m)
-        v2 = version.parse(n)
+        v1 = version.parse(version_of_first_branch)
+        v2 = version.parse(version_of_second_branch)
     except ValueError:
-        return strange_compare(m, n)
+        return strange_compare(version_of_first_branch, version_of_second_branch)
     if v1 < v2:
         return "<"
+    elif v1 == v2:
+        return "="
     return ">"
 
+
 def get_filter_expression(parameter: str) -> pl.Expr:
-        """Get polars expression by comparison symbol.
+        """Get Polars expression by comparison symbol.
 
         :param parameter: Comparison parameter, e.g. > or <.
         :return: Polars expression for this parameter.
         """
-        ex_unknown = pl.col("compare")=="?"
         ex_less = pl.col("compare")=="<"
         ex_great = pl.col("compare")==">"
         ex_equal = pl.col("compare")=="="
         ex_great_or_equal = ex_great | ex_equal
+        ex_less_or_equal = ex_less | ex_equal
+        ex_not_equal = ex_great | ex_less
 
-        filter_expression = ex_unknown
-        if parameter == "?":
-            filter_expression = ex_unknown
-        elif parameter == "=":
+        filter_expression = ex_great
+        if parameter == "eq":
             filter_expression = ex_equal
-        elif parameter == "<":
+        elif parameter == "lt":
             filter_expression = ex_less
-        elif parameter == ">":
+        elif parameter == "gt":
             filter_expression = ex_great
-        elif parameter == ">=":
+        elif parameter == "ge":
             filter_expression = ex_great_or_equal
+        elif parameter == "le":
+            filter_expression = ex_less_or_equal
+        elif parameter == "ne":
+            filter_expression = ex_not_equal
         return filter_expression
 
 
 
 # ########################################################################
-
 @click.command()
 @click.argument("branch1", type=click.STRING)
 @click.argument("branch2", type=click.STRING)
-@click.option("--arch", "-a",
-              default="all",
-              help="Only one architecture. Example: --arch aarch64"
+@click.option(
+    "--arch", "-a",
+    default="all",
+    help="Only one architecture. Example: --arch aarch64"
 )
 @click.option(
-    "--force",
-    "-f",
+    "--force", "-f",
     help="Force overwrite of existing branches data.",
     is_flag=True,
     default=False,
 )
 @click.option(
-    "--comp",
-    "-c",
-    type=click.Choice(["?", "<", ">", "=", ">="]),
-    help="How to compare two branches versions.",
-    default=">",
+    "--comp", "-c",
+    type=click.Choice(["lt", "gt", "eq", "ge", "le", "ne"]),
+    help="How to compare versions of the same packages in different branches. Example: --comp gt",  # noqa: E501
+    default="gt",
 )
 def main(branch1: str, branch2: str, force: bool, arch: str, comp: str) -> None: # noqa: FBT001
     """Compare packages in two different Alt Linux branches.
@@ -322,7 +345,7 @@ def main(branch1: str, branch2: str, force: bool, arch: str, comp: str) -> None:
     BRANCH1, BRANCH2 - names of the branches.
     Example:  sisyphus.py sisyphus p11
     """
-    json2 = None
+    json2: Path|None = None
     if force:
         click.echo("Forcing overwrite of existing branches data.")
         if is_branch_cache_exists(branch1):
@@ -394,22 +417,20 @@ def main(branch1: str, branch2: str, force: bool, arch: str, comp: str) -> None:
         )
 
         json_data[sys_arch] = {
-            "second_only_count": len(second_only_packages),
+            "second_only_count": second_only_packages["name"].count(),
             "second_only_packages": second_only_packages.to_dicts(),
-            "first_only_count": len(first_only_packages),
+            "first_only_count": first_only_packages["name"].count(),
             "first_only_packages": first_only_packages.to_dicts(),
-            "newest_in_first_count": len(equal_packages),
+            "newest_in_first_count": equal_packages["name"].count(),
             "newest_in_first": equal_packages.to_dicts(),
         }
 
     try:
-        output_file_name = f"{get_cache_dir_path()}/output.json"
+        output_file_name = "output.json"
         output_file = Path(output_file_name)
         with output_file.open("w+", encoding="utf-8") as f:
             json.dump(json_data, f, indent=2, ensure_ascii=False)
             f.flush()
-
-
         click.echo(f"Result downloaded in {output_file_name}.")
     except Exception:
         click.echo("Failed to write calculated data.")
