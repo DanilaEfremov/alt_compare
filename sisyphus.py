@@ -434,7 +434,7 @@ def main(branch1: str, branch2: str, force: bool, arch: str, comp: str) -> None:
             json.dump(json_data, f, indent=2, ensure_ascii=False)
             f.flush()
         end_time = timer()
-        click.echo(f"Result downloaded in {output_file_name}, took {end_time - start_time} seconds.")  # noqa: E501
+        click.echo(f"Result downloaded in {output_file_name}, took {(end_time - start_time):.4f} seconds.")  # noqa: E501
     except Exception:
         click.echo("Failed to write calculated data.")
 
