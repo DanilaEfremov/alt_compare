@@ -1,21 +1,11 @@
-#! /usr/bin/env -S uv run --script  # noqa: D100
-
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#     "click==8.2.1",
-#     "packaging>=25.0",
-#     "polars>=1.32.3",
-#     "requests>=2.32.5",
-# ]
-# ///
-
 import datetime
 import json
 import sys
 from http import HTTPStatus
 from pathlib import Path
 from timeit import default_timer as timer
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 import click
 import polars as pl
@@ -319,144 +309,75 @@ def get_filter_expression(parameter: str) -> pl.Expr:
 
 
 
-# ########################################################################
-@click.command()
-@click.argument("branch1", type=click.STRING)
-@click.argument("branch2", type=click.STRING)
-@click.option(
-    "--arch", "-a",
-    default="all",
-    help="Only one architecture. Example: --arch aarch64"
-)
-@click.option(
-    "--force", "-f",
-    help="Force overwrite of existing branches data.",
-    is_flag=True,
-    default=False,
-)
-@click.option(
-    "--comp", "-c",
-    type=click.Choice(["lt", "gt", "eq", "ge", "le", "ne"]),
-    help="How to compare versions of the same packages in different branches. Example: --comp gt",  # noqa: E501
-    default="gt",
-)
-def main(branch1: str, branch2: str, force: bool, arch: str, comp: str) -> None: # noqa: FBT001
-    """Compare packages in two different Alt Linux branches.
 
-    BRANCH1, BRANCH2 - names of the branches.
-    Example:  sisyphus.py sisyphus p11
-    """
-    # Находим нужные для вычислений данные
-    start_time = timer()
-    json2: Path|None = None
-    if force:
-        click.echo("Forcing overwrite of existing branches data.")
-        if is_branch_cache_exists(branch1):
-            delete_file(get_branch_file_name(branch1))
-        if is_branch_cache_exists(branch2):
-            delete_file(get_branch_file_name(branch2))
-    json1 = get_branch_json(branch1, arch)
 
-    if json1:
-        click.echo(f"JSON file for branch name {branch1} is {json1}.")
-        json2 = get_branch_json(branch2, arch)
-        if json2:
-            click.echo(f"JSON file for branch name {branch2} is {json2}.")
-        else:
-            click.echo(f"Don't know how to get JSON file for branch name {branch2}.")
-            return
+# p9 p10 p11 sisyphus
+col = "packages"
+
+json1 = get_branch_json('p9')
+json2 = get_branch_json('p10')
+json3 = get_branch_json('p11')
+json4 = get_branch_json('sisyphus')
+
+first_branch_packages = pl.read_json(json1).select(col).explode(col).unnest(col).select(["name", "version", "arch"]).rename({"version": "p9_version"})
+second_branch_packages = pl.read_json(json2).select(col).explode(col).unnest(col).select(["name", "version", "arch"]).rename({"version": "p10_version"})
+third_branch_packages = pl.read_json(json3).select(col).explode(col).unnest(col).select(["name", "version", "arch"]).rename({"version": "p11_version"})
+fourth_branch_packages = pl.read_json(json4).select(col).explode(col).unnest(col).select(["name", "version", "arch"]).rename({"version": "sisyphus_version"})
+
+counts = {
+    "p9": len(first_branch_packages),
+    "p10": len(second_branch_packages),
+    "p11": len(third_branch_packages),
+    "sisyphus": len(fourth_branch_packages),
+}
+
+# plt.bar(counts.keys(), counts.values())
+# plt.ylabel("Количество пакетов")
+# plt.xlabel("Ветка")
+# plt.title("Количество пакетов в каждой ветке")
+# plt.show()
+
+architectures = (
+        second_branch_packages["arch"].unique()
+        .append(
+            first_branch_packages["arch"].unique()
+        ).unique().append(
+            third_branch_packages["arch"].unique()
+        ).unique().append(
+            fourth_branch_packages["arch"].unique()
+        ).unique()
+    )
+print(architectures)
+counts_by_arch = {}
+for arch in architectures:
+    counts_by_arch[f"9{arch}"] = len(first_branch_packages.filter(first_branch_packages["arch"] == arch))
+    counts_by_arch[f"10{arch}"] = len(second_branch_packages.filter(second_branch_packages["arch"] == arch))
+    counts_by_arch[f"11{arch}"] = len(third_branch_packages.filter(third_branch_packages["arch"] == arch))
+    counts_by_arch[f"si{arch}"] = len(third_branch_packages.filter(third_branch_packages["arch"] == arch))
+
+
+barlist = plt.bar(counts_by_arch.keys(), counts_by_arch.values())
+for i in range(0, len(barlist)):
+    if (i+1) % 4 == 0:
+        barlist[i].set_color("blue")
+    elif (i+1) % 4 == 1:
+        barlist[i].set_color("red")
+    elif (i+1) % 4 == 2:
+        barlist[i].set_color("green")
     else:
-        click.echo(f"Don't know how to get JSON file for branch name {branch1}.")
-        return
+        barlist[i].set_color("orange")
 
-    # Делаем вычисления
-    start_calculate_time = timer()
-    col = "packages"
-    first_branch_packages = pl.read_json(json1).select(col).explode(col).unnest(col)
-    second_branch_packages = pl.read_json(json2).select(col).explode(col).unnest(col)
 
-    # Первая задача:
-    # Выбрать из списка пакетов все пакеты, которые есть
-    # во второй ветке дистрибутива, но нет в первой.
-    structs_second = (
-        second_branch_packages
-            .join(first_branch_packages, on=["name", "arch"], how="anti")
-            .with_columns(struct=pl.struct(pl.all()))
-            .select(["arch", "struct"])
-            .group_by("arch")
-            .agg(
-                pl.len().alias("second_only_count"),
-                pl.col("struct").alias("second_only"),
-            )
-    )
+legend_patches = [
+    mpatches.Patch(color="red", label="P9"),
+    mpatches.Patch(color="green", label="P10"),
+    mpatches.Patch(color="orange", label="P11"),
+    mpatches.Patch(color="blue", label="Sisyphus"),
+]
 
-    # Вторая задача:
-    # Выбрать из списка пакетов все пакеты, которые есть
-    # в первой ветке дистрибутива, но нет во второй.
-    structs_first = (
-        first_branch_packages.join(second_branch_packages, on=["name", "arch"], how="anti")  # noqa: E501
-        .with_columns(struct=pl.struct(pl.all()))
-        .select(["arch", "struct"])
-        .group_by("arch")
-        .agg(
-            pl.len().alias("first_only_count"),
-            pl.col("struct").alias("first_only"),
-        )
-    )
+plt.legend(handles=legend_patches, title="Цвета")
 
-    # Третья задача:
-    # Выбрать все пакеты из первой ветки дистрибутива, версии которых больше
-    # чем версии тех же пакетов второй ветки дистрибутива.
-    equal_packages = (
-        second_branch_packages.join(first_branch_packages, on="name", how="inner")
-        .select(
-            "name",
-            first_branch_version="version_right",
-            second_branch_version="version",
-            arch="arch"
-        )
-        .with_columns(
-            pl.struct("first_branch_version", "second_branch_version")
-            .map_elements(
-                lambda s: compare(
-                    s["first_branch_version"], s["second_branch_version"]
-                ),
-                return_dtype=pl.String,
-            )
-            .alias("compare")
-        )
-        .filter(get_filter_expression(comp))
-        .select(pl.all().exclude("compare")).with_columns(struct=pl.struct(["name", "first_branch_version", "second_branch_version"]))
-    )
-
-    equal_packages = (
-        equal_packages
-            .group_by("arch")
-            .len()
-            .rename({"len": "newer_in_first_count"})
-            .join(
-                equal_packages
-                    .select(["arch", "struct"])
-                    .group_by("arch")
-                    .agg("struct")
-                    .rename({"struct": "newer_in_first"}),
-                on="arch"
-            )
-        )
-
-    all_tasks = structs_second.join(structs_first, on="arch").join(equal_packages, on="arch")
-
-    start_output_time = timer()
-
-    # Сохраняем обработанные данные в файл
-    output_file_name = "output.json"
-    all_tasks.write_json(output_file_name)
-
-    end_time = timer()
-    click.echo(f"Result downloaded in {output_file_name}, took {(end_time - start_time):.4f} seconds.")  # noqa: E501
-    click.echo(f"Time for collecting JSON data, took {(start_calculate_time - start_time):.4f} seconds.")  # noqa: E501
-    click.echo(f"Time for calculating output JSON data, took {(start_output_time - start_calculate_time):.4f} seconds.")  # noqa: E501
-    click.echo(f"Time for writing output JSON data, took {(end_time - start_output_time):.4f} seconds.")  # noqa: E501
-
-if __name__ == "__main__":
-    main()
+plt.ylabel("Количество пакетов")
+plt.xlabel("Ветка и архитектура")
+plt.title("Количество пакетов в каждой ветке по архитектуре")
+plt.show()
