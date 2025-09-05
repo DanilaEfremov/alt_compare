@@ -72,6 +72,8 @@ Example:
 - `--force` / `-f` : Force overwrite of cached data
 - `--arch` / `-a` : Download only this architecture
 - `--comp` / `-c` : Comparison by needed symbol
+- `--file` : Calculations only with needed packages (their list from file)
+- `--packages` / `-p` : Calculations only with needed packages
 
 Example:
 
@@ -79,6 +81,8 @@ Example:
 ./sisyphus.py sisyphus p11 --force
 ./sisyphus.py sisyphus p11 --arch aarch64
 ./sisyphus.py sisyphus p11 --comp gt
+./sisyphus.py sisyphus p11 -p i586-ghc8.6.4-data-default-instances-dlist,libboost_container1.85.0-debuginfo,libqt6-networkauth-debuginfo,libopensubdiv3.6.0-debuginfo,libgtk-engine-rezlooks
+./sisyphus.py sisyphus p11 --file names.txt
 ```
 
 ## Output
